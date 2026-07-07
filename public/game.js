@@ -159,15 +159,24 @@ function handleMessage(msg) {
           renderSelectMode();
         }
       } else {
+        // Special is done — card will be auto-discarded by server
         selectMode = null;
-        renderSwapOrDiscard();
+        drawnCard = null;
+        document.getElementById('drawn-card-area').classList.add('hidden');
+        document.getElementById('action-buttons').innerHTML = '';
       }
       renderGame();
       break;
 
     case 'special_skipped':
       selectMode = null;
-      renderSwapOrDiscard();
+      // Only render swap/discard if we still have a drawn card (skipped the power)
+      if (drawnCard) {
+        renderSwapOrDiscard();
+      } else {
+        document.getElementById('drawn-card-area').classList.add('hidden');
+        document.getElementById('action-buttons').innerHTML = '';
+      }
       break;
 
     case 'swap_occurred':
@@ -237,6 +246,13 @@ function renderGame() {
   renderOpponents();
   renderTableCenter();
   renderMyCards();
+
+  // Re-render contextual UI if active
+  if (drawnCard && !stickWindowOpen) {
+    renderDrawnCard();
+  } else if (stickWindowOpen) {
+    renderStickWindow();
+  }
 }
 
 function renderOpponents() {
@@ -246,6 +262,9 @@ function renderOpponents() {
   area.innerHTML = opponents.map(p => {
     const isCurrent = p.id === gameState.currentPlayerId;
     const cards = (p.cards || []).map((c, i) => {
+      if (c === null) {
+        return `<div class="card card-empty"></div>`;
+      }
       const known = knownCards[c.id];
       if (known) {
         const color = getCardColor(known);
@@ -295,7 +314,6 @@ function renderTableCenter() {
 
   // Show Kaboom button only on your turn, before drawing
   if (isMyTurn && gameState.turnPhase === 'draw' && !gameState.kaboomCallerId && !stickWindowOpen && !drawnCard) {
-    // Only show draw + kaboom buttons if we haven't drawn yet
     if (!selectMode) {
       btns.innerHTML = `
         <button class="btn btn-danger" onclick="callKaboom()">💥 Call Kaboom</button>
@@ -319,6 +337,9 @@ function renderMyCards() {
   if (!me) return;
 
   container.innerHTML = me.cards.map((c, i) => {
+    if (c === null) {
+      return `<div class="card card-empty"></div>`;
+    }
     const known = knownCards[c.id];
     const selectable = (selectMode && canSelectOwn()) ? 'selectable' : '';
     const isPeeking = initialPeekCards.includes(c.id);
@@ -355,7 +376,7 @@ function renderDrawnCard() {
   if (specialType) {
     btns.innerHTML = `
       <button class="btn btn-success" onclick="useSpecial()">Use ${getSpecialName(specialType)}</button>
-      <button class="btn btn-secondary" onclick="skipSpecial()">Skip & Choose</button>
+      <button class="btn btn-secondary" onclick="skipSpecial()">Skip Power & Swap</button>
     `;
   } else {
     renderSwapOrDiscard();
@@ -437,6 +458,9 @@ function renderStickWindow() {
   const btns = document.getElementById('action-buttons');
   const info = document.getElementById('game-info');
 
+  // Hide drawn card area during stick window
+  document.getElementById('drawn-card-area').classList.add('hidden');
+
   info.textContent = `⚡ Stick window! Match: ${formatCard(lastDiscard)}`;
   btns.innerHTML = `
     <button class="btn btn-success" onclick="startStick('own')">Stick My Card</button>
@@ -445,6 +469,7 @@ function renderStickWindow() {
 
   selectMode = null;
   renderMyCards();
+  renderOpponents();
 }
 
 function startStick(target) {
@@ -578,11 +603,17 @@ function callKaboom() {
 function confirmSwap() {
   send({ type: 'special_swap_confirm' });
   selectMode = null;
+  drawnCard = null;
+  document.getElementById('drawn-card-area').classList.add('hidden');
+  document.getElementById('action-buttons').innerHTML = '';
 }
 
 function skipSwap() {
   send({ type: 'special_skip_swap' });
   selectMode = null;
+  drawnCard = null;
+  document.getElementById('drawn-card-area').classList.add('hidden');
+  document.getElementById('action-buttons').innerHTML = '';
 }
 
 function updateSelectModeStep() {

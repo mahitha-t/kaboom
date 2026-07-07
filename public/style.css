@@ -296,6 +296,12 @@ input:focus {
   font-size: 1.5rem;
 }
 
+.card-empty {
+  background: transparent;
+  border: 2px dashed #333;
+  opacity: 0.3;
+}
+
 .deck-card {
   box-shadow: 3px 3px 0 #111, 6px 6px 0 #0a0a0a;
 }

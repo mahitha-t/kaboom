@@ -117,11 +117,8 @@ function getPublicGameState(room, forPlayerId) {
     players: room.players.map(p => ({
       id: p.id,
       name: p.name,
-      cardCount: p.cards.length,
-      cards: p.cards.map(c => ({
-        id: c.id,
-        faceUp: c.faceUp || false
-      })),
+      cardCount: p.cards.filter(c => c !== null).length,
+      cards: p.cards.map(c => c ? { id: c.id, faceUp: c.faceUp || false } : null),
       connected: p.connected
     })),
     currentPlayerIndex: room.currentPlayerIndex,
@@ -139,6 +136,32 @@ function broadcastGameState(room) {
   for (const player of room.players) {
     sendToPlayer(room, player.id, getPublicGameState(room, player.id));
   }
+}
+
+// Auto-discard drawn card after using its special power, then open stick window
+function autoDiscardAfterSpecial(room) {
+  const card = room.drawnCard;
+  room.discardPile.push(card);
+  room.drawnCard = null;
+
+  room.turnPhase = 'stick_window';
+
+  broadcastToRoom(room, {
+    type: 'card_discarded',
+    card,
+    playerId: room.players[room.currentPlayerIndex].id,
+    action: 'discard'
+  });
+
+  broadcastToRoom(room, { type: 'stick_window_open', card });
+  broadcastGameState(room);
+
+  setTimeout(() => {
+    if (room.turnPhase === 'stick_window') {
+      broadcastToRoom(room, { type: 'stick_window_closed' });
+      nextTurn(room);
+    }
+  }, 5000);
 }
 
 function startGame(room) {
@@ -208,11 +231,12 @@ function endGame(room) {
   room.state = 'ended';
 
   const results = room.players.map(p => {
-    const score = p.cards.reduce((sum, card) => sum + getCardPoints(card), 0);
+    const activeCards = p.cards.filter(c => c !== null);
+    const score = activeCards.reduce((sum, card) => sum + getCardPoints(card), 0);
     return {
       id: p.id,
       name: p.name,
-      cards: p.cards,
+      cards: activeCards,
       score
     };
   });
@@ -377,7 +401,7 @@ wss.on('connection', (ws) => {
         if (!targetPlayer) break;
 
         const targetCard = targetPlayer.cards[msg.cardIndex];
-        if (!targetCard) break;
+        if (!targetCard) break; // null slot or invalid index
 
         switch (action.type) {
           case 'peek_own': {
@@ -388,8 +412,7 @@ wss.on('connection', (ws) => {
               targetPlayerId: msg.targetPlayerId,
               cardIndex: msg.cardIndex
             });
-            currentRoom.turnPhase = 'swap_or_discard';
-            broadcastGameState(currentRoom);
+            autoDiscardAfterSpecial(currentRoom);
             break;
           }
 
@@ -401,8 +424,7 @@ wss.on('connection', (ws) => {
               targetPlayerId: msg.targetPlayerId,
               cardIndex: msg.cardIndex
             });
-            currentRoom.turnPhase = 'swap_or_discard';
-            broadcastGameState(currentRoom);
+            autoDiscardAfterSpecial(currentRoom);
             break;
           }
 
@@ -437,8 +459,7 @@ wss.on('connection', (ws) => {
                 message: `${currentRoom.players.find(p => p.id === playerId).name} did a blind swap!`
               });
 
-              currentRoom.turnPhase = 'swap_or_discard';
-              broadcastGameState(currentRoom);
+              autoDiscardAfterSpecial(currentRoom);
             }
             break;
           }
@@ -470,8 +491,7 @@ wss.on('connection', (ws) => {
                 message: `${currentRoom.players.find(p => p.id === playerId).name} used Queen to swap!`
               });
 
-              currentRoom.turnPhase = 'swap_or_discard';
-              broadcastGameState(currentRoom);
+              autoDiscardAfterSpecial(currentRoom);
             }
             break;
           }
@@ -533,9 +553,7 @@ wss.on('connection', (ws) => {
           });
         }
 
-        currentRoom.turnPhase = 'swap_or_discard';
-        sendToPlayer(currentRoom, playerId, { type: 'special_skipped' });
-        broadcastGameState(currentRoom);
+        autoDiscardAfterSpecial(currentRoom);
         break;
       }
 
@@ -543,9 +561,7 @@ wss.on('connection', (ws) => {
         if (!currentRoom || currentRoom.turnPhase !== 'special_action') break;
         if (currentRoom.players[currentRoom.currentPlayerIndex].id !== playerId) break;
 
-        currentRoom.turnPhase = 'swap_or_discard';
-        sendToPlayer(currentRoom, playerId, { type: 'special_skipped' });
-        broadcastGameState(currentRoom);
+        autoDiscardAfterSpecial(currentRoom);
         break;
       }
 
@@ -625,14 +641,21 @@ wss.on('connection', (ws) => {
         if (!stickCard) break;
 
         if (getCardNumericValue(stickCard) === getCardNumericValue(topDiscard)) {
-          targetP.cards.splice(msg.cardIndex, 1);
+          // Replace with null to keep grid shape
+          targetP.cards[msg.cardIndex] = null;
           currentRoom.discardPile.push(stickCard);
 
           if (msg.targetPlayerId !== playerId && msg.giveCardIndex !== undefined) {
             const giveCard = sticker.cards[msg.giveCardIndex];
             if (giveCard) {
-              sticker.cards.splice(msg.giveCardIndex, 1);
-              targetP.cards.push(giveCard);
+              sticker.cards[msg.giveCardIndex] = null;
+              // Place the given card in the empty slot
+              const emptySlot = targetP.cards.indexOf(null);
+              if (emptySlot !== -1) {
+                targetP.cards[emptySlot] = giveCard;
+              } else {
+                targetP.cards.push(giveCard);
+              }
             }
           }
 
