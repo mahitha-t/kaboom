@@ -6,9 +6,10 @@ let drawnCard = null;
 let specialType = null;
 let specialStep = 0;
 let knownCards = {}; // { cardId: card }
-let selectMode = null; // null, 'swap', 'peek_own', 'peek_opponent', 'blind_swap_mine', 'blind_swap_theirs', 'peek_swap_1', 'peek_swap_2', 'peek_two_1', 'peek_two_2', 'stick_mine', 'stick_theirs'
+let selectMode = null;
 let stickWindowOpen = false;
 let lastDiscard = null;
+let peekingInitial = false; // true during the 3s initial peek
 
 // --- Elements ---
 const screens = {
@@ -90,15 +91,28 @@ function handleMessage(msg) {
 
     case 'game_state':
       gameState = msg;
-      renderGame();
+      if (!peekingInitial) {
+        renderGame();
+      }
       break;
 
     case 'initial_peek':
+      // Show cards face-up for 3 seconds then flip
+      peekingInitial = true;
       msg.cards.forEach(c => {
         knownCards[c.card.id] = c.card;
       });
-      showToast('Memorize your bottom 2 cards!', 3000);
+      showToast('Memorize your bottom 2 cards! (3s)', 3000);
       renderGame();
+      // After 3 seconds, remove from known and flip back
+      setTimeout(() => {
+        msg.cards.forEach(c => {
+          // Keep them in knownCards — player memorized them
+          // But mark peeking as done
+        });
+        peekingInitial = false;
+        renderGame();
+      }, msg.duration || 3000);
       break;
 
     case 'card_drawn':
@@ -128,10 +142,9 @@ function handleMessage(msg) {
       showToast(`Peeked: ${formatCard(msg.card)}`, 3000);
       if (msg.canSwap) {
         if (msg.peekNumber === 2) {
-          // Black King second peek — ask to swap
           renderSwapConfirm();
         } else if (msg.peekNumber === 1) {
-          // Black King first peek — wait for second
+          // Black King first peek — wait for second selection
         } else {
           // Queen — select second card to swap with
           selectMode = 'peek_swap_2';
@@ -146,17 +159,17 @@ function handleMessage(msg) {
 
     case 'special_skipped':
       selectMode = null;
-      drawnCard = drawnCard; // still have drawn card
       renderSwapOrDiscard();
       break;
 
     case 'swap_occurred':
       showToast(msg.message, 3000);
-      // Invalidate known cards for swapped positions
       break;
 
     case 'card_discarded':
       lastDiscard = msg.card;
+      drawnCard = null;
+      document.getElementById('drawn-card-area').classList.add('hidden');
       showToast(`${getPlayerName(msg.playerId)} discarded ${formatCard(msg.card)}`);
       break;
 
@@ -169,7 +182,6 @@ function handleMessage(msg) {
     case 'stick_window_closed':
       stickWindowOpen = false;
       selectMode = null;
-      renderGame();
       break;
 
     case 'stick_success':
@@ -184,8 +196,8 @@ function handleMessage(msg) {
       showToast(`${msg.playerName} failed a stick and got a penalty card!`, 3000);
       break;
 
-    case 'cambio_called':
-      showToast(`🔥 ${msg.playerName} called CAMBIO! Everyone gets one more turn.`, 5000);
+    case 'kaboom_called':
+      showToast(`💥 ${msg.playerName} called KABOOM! Everyone gets one more turn.`, 5000);
       break;
 
     case 'player_disconnected':
@@ -249,6 +261,7 @@ function renderTableCenter() {
   const deckEl = document.getElementById('deck');
   const discardEl = document.getElementById('discard');
   const infoEl = document.getElementById('game-info');
+  const btns = document.getElementById('action-buttons');
 
   deckEl.querySelector('.deck-count').textContent = gameState.deckCount;
 
@@ -261,12 +274,27 @@ function renderTableCenter() {
   }
 
   const isMyTurn = gameState.currentPlayerId === myId;
-  if (gameState.cambioCallerId) {
-    infoEl.textContent = `🔥 CAMBIO called! Final turns...`;
+
+  if (gameState.kaboomCallerId) {
+    infoEl.textContent = `💥 KABOOM called! Final turns...`;
+  } else if (isMyTurn && gameState.turnPhase === 'draw') {
+    infoEl.textContent = 'Your turn — draw a card or call Kaboom!';
   } else if (isMyTurn) {
     infoEl.textContent = 'Your turn!';
   } else {
     infoEl.textContent = `${getPlayerName(gameState.currentPlayerId)}'s turn`;
+  }
+
+  // Show Kaboom button only on your turn, before drawing
+  if (isMyTurn && gameState.turnPhase === 'draw' && !gameState.kaboomCallerId && !stickWindowOpen && !drawnCard) {
+    // Only show draw + kaboom buttons if we haven't drawn yet
+    if (!selectMode) {
+      btns.innerHTML = `
+        <button class="btn btn-danger" onclick="callKaboom()">💥 Call Kaboom</button>
+      `;
+    }
+  } else if (!stickWindowOpen && !drawnCard && !selectMode) {
+    btns.innerHTML = '';
   }
 
   // Deck click for drawing
@@ -338,11 +366,6 @@ function renderSwapOrDiscard() {
     <button class="btn btn-secondary" onclick="discardDrawn()">Discard</button>
     <span style="color:#888;font-size:0.8rem;">or tap your card to swap</span>
   `;
-
-  // Cambio button
-  if (!gameState.cambioCallerId && gameState.turnPhase === 'draw') {
-    btns.innerHTML += `<button class="btn btn-danger" onclick="callCambio()">Call Cambio</button>`;
-  }
 
   renderMyCards();
 }
@@ -460,6 +483,7 @@ function onCardClick(targetPlayerId, cardIndex) {
       if (targetPlayerId !== myId) return;
       send({ type: 'special_select', targetPlayerId, cardIndex });
       selectMode = 'blind_swap_theirs';
+      renderSelectMode();
       break;
 
     case 'blind_swap_theirs':
@@ -470,7 +494,7 @@ function onCardClick(targetPlayerId, cardIndex) {
 
     case 'peek_swap_1':
       send({ type: 'special_select', targetPlayerId, cardIndex });
-      selectMode = null; // Wait for server response
+      selectMode = null;
       break;
 
     case 'peek_swap_2':
@@ -481,6 +505,7 @@ function onCardClick(targetPlayerId, cardIndex) {
     case 'peek_two_1':
       send({ type: 'special_select', targetPlayerId, cardIndex });
       selectMode = 'peek_two_2';
+      renderSelectMode();
       break;
 
     case 'peek_two_2':
@@ -497,7 +522,7 @@ function onCardClick(targetPlayerId, cardIndex) {
 
     case 'stick_theirs':
       if (targetPlayerId === myId) {
-        // This is selecting which card to give them
+        // Selecting which card to give them
         if (stickTargetPlayer !== null) {
           send({ type: 'stick', targetPlayerId: stickTargetPlayer, cardIndex: stickTargetIndex, giveCardIndex: cardIndex });
           selectMode = null;
@@ -510,7 +535,6 @@ function onCardClick(targetPlayerId, cardIndex) {
       // First select opponent's card
       stickTargetPlayer = targetPlayerId;
       stickTargetIndex = cardIndex;
-      selectMode = 'stick_theirs';
       document.getElementById('game-info').textContent = 'Now select YOUR card to give them';
       renderMyCards();
       break;
@@ -535,9 +559,9 @@ function discardDrawn() {
   document.getElementById('action-buttons').innerHTML = '';
 }
 
-function callCambio() {
-  if (confirm('Are you sure you want to call Cambio?')) {
-    send({ type: 'call_cambio' });
+function callKaboom() {
+  if (confirm('Are you sure you want to call Kaboom?')) {
+    send({ type: 'call_kaboom' });
   }
 }
 
@@ -549,6 +573,10 @@ function confirmSwap() {
 function skipSwap() {
   send({ type: 'special_skip_swap' });
   selectMode = null;
+}
+
+function updateSelectModeStep() {
+  // Called when specialStep increments — rendering handled by renderSelectMode
 }
 
 // --- Game Over ---
@@ -564,7 +592,7 @@ function renderGameOver(msg) {
       return `<span class="mini-card ${color}">${formatCardShort(c)}</span>`;
     }).join('');
 
-    const callerTag = r.id === msg.cambioCallerId ? ' 📢' : '';
+    const callerTag = r.id === msg.kaboomCallerId ? ' 💥' : '';
 
     return `<div class="result-row">
       <span class="rank">${rank}</span>

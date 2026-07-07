@@ -53,18 +53,12 @@ function getCardPoints(card) {
 }
 
 function getCardNumericValue(card) {
-  // For sticking comparison — just the face value number
   if (card.value === 'JOKER') return 0;
   if (card.value === 'A') return 1;
   if (card.value === 'J') return 11;
   if (card.value === 'Q') return 12;
   if (card.value === 'K') return 13;
   return parseInt(card.value);
-}
-
-function isSpecialCard(card) {
-  return ['7', '8', '9', '10', 'J', 'Q', 'K'].includes(card.value) &&
-    !(card.value === 'K' && (card.suit === 'hearts' || card.suit === 'diamonds'));
 }
 
 function getSpecialType(card) {
@@ -86,16 +80,15 @@ function createRoom(hostId, hostName) {
       cards: [],
       connected: true
     }],
-    state: 'lobby', // lobby, playing, ended
+    state: 'lobby',
     deck: [],
     discardPile: [],
     currentPlayerIndex: 0,
-    cambioCallerId: null,
+    kaboomCallerId: null,
     finalTurnsRemaining: 0,
-    turnPhase: 'draw', // draw, special_action, stick_window
+    turnPhase: 'draw',
     drawnCard: null,
-    specialAction: null,
-    stickTimeout: null
+    specialAction: null
   };
   rooms.set(roomCode, room);
   return room;
@@ -136,10 +129,16 @@ function getPublicGameState(room, forPlayerId) {
     discardTop: room.discardPile.length > 0 ? room.discardPile[room.discardPile.length - 1] : null,
     discardCount: room.discardPile.length,
     deckCount: room.deck.length,
-    cambioCallerId: room.cambioCallerId,
+    kaboomCallerId: room.kaboomCallerId,
     turnPhase: room.turnPhase,
     myId: forPlayerId
   };
+}
+
+function broadcastGameState(room) {
+  for (const player of room.players) {
+    sendToPlayer(room, player.id, getPublicGameState(room, player.id));
+  }
 }
 
 function startGame(room) {
@@ -163,18 +162,17 @@ function startGame(room) {
   room.discardPile.push(room.deck.pop());
 
   // Send game state to all
-  for (const player of room.players) {
-    sendToPlayer(room, player.id, getPublicGameState(room, player.id));
-  }
+  broadcastGameState(room);
 
-  // Allow each player to peek at their bottom 2 cards (indices 2, 3)
+  // Allow each player to peek at their bottom 2 cards (indices 2, 3) for 3 seconds
   for (const player of room.players) {
     sendToPlayer(room, player.id, {
       type: 'initial_peek',
       cards: [
         { index: 2, card: player.cards[2] },
         { index: 3, card: player.cards[3] }
-      ]
+      ],
+      duration: 3000
     });
   }
 }
@@ -182,8 +180,8 @@ function startGame(room) {
 function nextTurn(room) {
   if (room.state !== 'playing') return;
 
-  // Check if game should end (cambio was called and final turns done)
-  if (room.cambioCallerId !== null) {
+  // Check if game should end
+  if (room.kaboomCallerId !== null) {
     room.finalTurnsRemaining--;
     if (room.finalTurnsRemaining <= 0) {
       endGame(room);
@@ -194,8 +192,8 @@ function nextTurn(room) {
   // Move to next player
   room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length;
 
-  // Skip the cambio caller in final round
-  if (room.cambioCallerId !== null && room.players[room.currentPlayerIndex].id === room.cambioCallerId) {
+  // Skip the kaboom caller in final round
+  if (room.kaboomCallerId !== null && room.players[room.currentPlayerIndex].id === room.kaboomCallerId) {
     room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length;
   }
 
@@ -203,10 +201,7 @@ function nextTurn(room) {
   room.drawnCard = null;
   room.specialAction = null;
 
-  // Broadcast updated state
-  for (const player of room.players) {
-    sendToPlayer(room, player.id, getPublicGameState(room, player.id));
-  }
+  broadcastGameState(room);
 }
 
 function endGame(room) {
@@ -227,7 +222,7 @@ function endGame(room) {
   broadcastToRoom(room, {
     type: 'game_over',
     results,
-    cambioCallerId: room.cambioCallerId
+    kaboomCallerId: room.kaboomCallerId
   });
 }
 
@@ -312,7 +307,6 @@ wss.on('connection', (ws) => {
         if (currentRoom.players[currentRoom.currentPlayerIndex].id !== playerId) break;
         if (currentRoom.turnPhase !== 'draw') break;
         if (currentRoom.deck.length === 0) {
-          // Reshuffle discard pile into deck
           const topDiscard = currentRoom.discardPile.pop();
           currentRoom.deck = shuffle(currentRoom.discardPile);
           currentRoom.discardPile = [topDiscard];
@@ -324,27 +318,26 @@ wss.on('connection', (ws) => {
         const special = getSpecialType(card);
         if (special) {
           currentRoom.turnPhase = 'decide_special';
-          sendToPlayer(currentRoom, playerId, {
-            type: 'card_drawn',
-            card,
-            special,
-            canUseSpecial: true
-          });
         } else {
           currentRoom.turnPhase = 'swap_or_discard';
-          sendToPlayer(currentRoom, playerId, {
-            type: 'card_drawn',
-            card,
-            special: null,
-            canUseSpecial: false
-          });
         }
 
-        // Tell others someone drew
+        // Send drawn card to the player
+        sendToPlayer(currentRoom, playerId, {
+          type: 'card_drawn',
+          card,
+          special: special || null,
+          canUseSpecial: !!special
+        });
+
+        // Tell others someone drew and broadcast updated phase
         broadcastToRoom(currentRoom, {
           type: 'player_drew',
           playerId
         }, playerId);
+
+        // Broadcast updated game state so everyone has current turnPhase
+        broadcastGameState(currentRoom);
         break;
       }
 
@@ -371,6 +364,7 @@ wss.on('connection', (ws) => {
         sendToPlayer(currentRoom, playerId, {
           type: 'special_skipped'
         });
+        broadcastGameState(currentRoom);
         break;
       }
 
@@ -395,6 +389,7 @@ wss.on('connection', (ws) => {
               cardIndex: msg.cardIndex
             });
             currentRoom.turnPhase = 'swap_or_discard';
+            broadcastGameState(currentRoom);
             break;
           }
 
@@ -407,12 +402,12 @@ wss.on('connection', (ws) => {
               cardIndex: msg.cardIndex
             });
             currentRoom.turnPhase = 'swap_or_discard';
+            broadcastGameState(currentRoom);
             break;
           }
 
           case 'blind_swap': {
             if (action.step === 0) {
-              // First pick: must be own card
               if (msg.targetPlayerId !== playerId) {
                 sendToPlayer(currentRoom, playerId, { type: 'error', message: 'Pick your own card first' });
                 break;
@@ -421,19 +416,18 @@ wss.on('connection', (ws) => {
               action.step = 1;
               sendToPlayer(currentRoom, playerId, {
                 type: 'special_progress',
-                message: 'Now pick an opponent\'s card to swap with'
+                message: "Now pick an opponent's card to swap with"
               });
             } else {
-              // Second pick: must be opponent's card
               if (msg.targetPlayerId === playerId) {
-                sendToPlayer(currentRoom, playerId, { type: 'error', message: 'Pick an opponent\'s card' });
+                sendToPlayer(currentRoom, playerId, { type: 'error', message: "Pick an opponent's card" });
                 break;
               }
-              const myCard = currentRoom.players.find(p => p.id === playerId).cards[action.ownCardIndex];
+              const myCards = currentRoom.players.find(p => p.id === playerId).cards;
+              const myCard = myCards[action.ownCardIndex];
               const theirCard = targetPlayer.cards[msg.cardIndex];
 
-              // Swap
-              currentRoom.players.find(p => p.id === playerId).cards[action.ownCardIndex] = theirCard;
+              myCards[action.ownCardIndex] = theirCard;
               targetPlayer.cards[msg.cardIndex] = myCard;
 
               broadcastToRoom(currentRoom, {
@@ -444,14 +438,13 @@ wss.on('connection', (ws) => {
               });
 
               currentRoom.turnPhase = 'swap_or_discard';
+              broadcastGameState(currentRoom);
             }
             break;
           }
 
           case 'peek_swap': {
-            // Queen: peek at any one card, then optionally swap it with any other card
             if (action.step === 0) {
-              // Peek at the selected card
               action.peekedCard = { playerId: msg.targetPlayerId, cardIndex: msg.cardIndex };
               action.step = 1;
               sendToPlayer(currentRoom, playerId, {
@@ -462,11 +455,9 @@ wss.on('connection', (ws) => {
                 canSwap: true
               });
             } else if (action.step === 1) {
-              // Swap the peeked card with this selected card
               const peeked = action.peekedCard;
               const peekedPlayer = currentRoom.players.find(p => p.id === peeked.playerId);
               const peekedCard = peekedPlayer.cards[peeked.cardIndex];
-
               const swapCard = targetPlayer.cards[msg.cardIndex];
 
               peekedPlayer.cards[peeked.cardIndex] = swapCard;
@@ -480,12 +471,12 @@ wss.on('connection', (ws) => {
               });
 
               currentRoom.turnPhase = 'swap_or_discard';
+              broadcastGameState(currentRoom);
             }
             break;
           }
 
           case 'peek_two_swap': {
-            // Black King: peek at 2 cards, then optionally swap them
             if (action.step === 0) {
               action.peekedCards.push({ playerId: msg.targetPlayerId, cardIndex: msg.cardIndex, card: targetCard });
               sendToPlayer(currentRoom, playerId, {
@@ -519,7 +510,6 @@ wss.on('connection', (ws) => {
       }
 
       case 'special_swap_confirm': {
-        // For peek_swap (Queen) and peek_two_swap (Black King) - confirm the swap
         if (!currentRoom || currentRoom.turnPhase !== 'special_action') break;
         if (currentRoom.players[currentRoom.currentPlayerIndex].id !== playerId) break;
 
@@ -545,16 +535,17 @@ wss.on('connection', (ws) => {
 
         currentRoom.turnPhase = 'swap_or_discard';
         sendToPlayer(currentRoom, playerId, { type: 'special_skipped' });
+        broadcastGameState(currentRoom);
         break;
       }
 
       case 'special_skip_swap': {
-        // Skip the optional swap for Queen/Black King
         if (!currentRoom || currentRoom.turnPhase !== 'special_action') break;
         if (currentRoom.players[currentRoom.currentPlayerIndex].id !== playerId) break;
 
         currentRoom.turnPhase = 'swap_or_discard';
         sendToPlayer(currentRoom, playerId, { type: 'special_skipped' });
+        broadcastGameState(currentRoom);
         break;
       }
 
@@ -568,6 +559,9 @@ wss.on('connection', (ws) => {
         currentRoom.discardPile.push(oldCard);
         currentRoom.drawnCard = null;
 
+        // Enter stick window
+        currentRoom.turnPhase = 'stick_window';
+
         broadcastToRoom(currentRoom, {
           type: 'card_discarded',
           card: oldCard,
@@ -575,13 +569,11 @@ wss.on('connection', (ws) => {
           action: 'swap'
         });
 
-        // Brief stick window
-        currentRoom.turnPhase = 'stick_window';
         broadcastToRoom(currentRoom, { type: 'stick_window_open', card: oldCard });
+        broadcastGameState(currentRoom);
 
         setTimeout(() => {
           if (currentRoom.turnPhase === 'stick_window') {
-            currentRoom.turnPhase = 'draw';
             broadcastToRoom(currentRoom, { type: 'stick_window_closed' });
             nextTurn(currentRoom);
           }
@@ -597,6 +589,9 @@ wss.on('connection', (ws) => {
         currentRoom.discardPile.push(card);
         currentRoom.drawnCard = null;
 
+        // Enter stick window
+        currentRoom.turnPhase = 'stick_window';
+
         broadcastToRoom(currentRoom, {
           type: 'card_discarded',
           card,
@@ -604,13 +599,11 @@ wss.on('connection', (ws) => {
           action: 'discard'
         });
 
-        // Brief stick window
-        currentRoom.turnPhase = 'stick_window';
         broadcastToRoom(currentRoom, { type: 'stick_window_open', card });
+        broadcastGameState(currentRoom);
 
         setTimeout(() => {
           if (currentRoom.turnPhase === 'stick_window') {
-            currentRoom.turnPhase = 'draw';
             broadcastToRoom(currentRoom, { type: 'stick_window_closed' });
             nextTurn(currentRoom);
           }
@@ -632,11 +625,9 @@ wss.on('connection', (ws) => {
         if (!stickCard) break;
 
         if (getCardNumericValue(stickCard) === getCardNumericValue(topDiscard)) {
-          // Remove card from target
           targetP.cards.splice(msg.cardIndex, 1);
           currentRoom.discardPile.push(stickCard);
 
-          // If sticking someone else's card, give them one of yours
           if (msg.targetPlayerId !== playerId && msg.giveCardIndex !== undefined) {
             const giveCard = sticker.cards[msg.giveCardIndex];
             if (giveCard) {
@@ -654,12 +645,10 @@ wss.on('connection', (ws) => {
             isOwnCard: msg.targetPlayerId === playerId
           });
 
-          // End stick window and move to next turn
-          currentRoom.turnPhase = 'draw';
+          currentRoom.turnPhase = 'done';
           broadcastToRoom(currentRoom, { type: 'stick_window_closed' });
           nextTurn(currentRoom);
         } else {
-          // Wrong stick — penalty: draw a card from deck and add to your hand
           if (currentRoom.deck.length > 0) {
             const penaltyCard = currentRoom.deck.pop();
             penaltyCard.faceUp = false;
@@ -674,21 +663,22 @@ wss.on('connection', (ws) => {
             playerId,
             playerName: sticker.name
           }, playerId);
+          broadcastGameState(currentRoom);
         }
         break;
       }
 
-      case 'call_cambio': {
+      case 'call_kaboom': {
         if (!currentRoom || currentRoom.state !== 'playing') break;
         if (currentRoom.players[currentRoom.currentPlayerIndex].id !== playerId) break;
-        if (currentRoom.cambioCallerId !== null) break;
+        if (currentRoom.kaboomCallerId !== null) break;
         if (currentRoom.turnPhase !== 'draw') break;
 
-        currentRoom.cambioCallerId = playerId;
+        currentRoom.kaboomCallerId = playerId;
         currentRoom.finalTurnsRemaining = currentRoom.players.length - 1;
 
         broadcastToRoom(currentRoom, {
-          type: 'cambio_called',
+          type: 'kaboom_called',
           playerId,
           playerName: currentRoom.players.find(p => p.id === playerId).name
         });
@@ -722,5 +712,5 @@ wss.on('connection', (ws) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Cambio server running on http://localhost:${PORT}`);
+  console.log(`Kaboom server running on http://localhost:${PORT}`);
 });
