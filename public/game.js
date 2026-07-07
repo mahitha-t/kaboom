@@ -92,9 +92,7 @@ function handleMessage(msg) {
 
     case 'game_state':
       gameState = msg;
-      if (!peekingInitial) {
-        renderGame();
-      }
+      renderGame();
       break;
 
     case 'initial_peek':
