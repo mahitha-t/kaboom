@@ -390,6 +390,27 @@ input:focus {
   50% { box-shadow: 0 0 12px 4px rgba(74, 158, 255, 0.3); }
 }
 
+/* Card flip animations */
+.flip-in {
+  animation: flipIn 0.4s ease-out;
+}
+
+.flipping-back {
+  animation: flipOut 0.4s ease-in forwards;
+}
+
+@keyframes flipIn {
+  0% { transform: rotateY(180deg); opacity: 0; }
+  50% { opacity: 0.5; }
+  100% { transform: rotateY(0deg); opacity: 1; }
+}
+
+@keyframes flipOut {
+  0% { transform: rotateY(0deg); opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { transform: rotateY(180deg); opacity: 0; }
+}
+
 .drawn-card-area {
   display: flex;
   flex-direction: column;

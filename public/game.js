@@ -10,6 +10,7 @@ let selectMode = null;
 let stickWindowOpen = false;
 let lastDiscard = null;
 let peekingInitial = false; // true during the 3s initial peek
+let initialPeekCards = []; // card IDs currently being peeked
 
 // --- Elements ---
 const screens = {
@@ -97,21 +98,30 @@ function handleMessage(msg) {
       break;
 
     case 'initial_peek':
-      // Show cards face-up for 3 seconds then flip
+      // Show cards face-up for 3 seconds then flip back
       peekingInitial = true;
+      initialPeekCards = msg.cards.map(c => c.card.id);
       msg.cards.forEach(c => {
         knownCards[c.card.id] = c.card;
       });
       showToast('Memorize your bottom 2 cards! (3s)', 3000);
       renderGame();
-      // After 3 seconds, remove from known and flip back
+      // After 3 seconds, flip them back
       setTimeout(() => {
-        msg.cards.forEach(c => {
-          // Keep them in knownCards — player memorized them
-          // But mark peeking as done
+        // Add flip-back animation class
+        initialPeekCards.forEach(id => {
+          const el = document.querySelector(`[data-card-id="${id}"]`);
+          if (el) el.classList.add('flipping-back');
         });
-        peekingInitial = false;
-        renderGame();
+        // After flip animation, remove from known
+        setTimeout(() => {
+          initialPeekCards.forEach(id => {
+            delete knownCards[id];
+          });
+          initialPeekCards = [];
+          peekingInitial = false;
+          renderGame();
+        }, 400);
       }, msg.duration || 3000);
       break;
 
@@ -313,14 +323,16 @@ function renderMyCards() {
   container.innerHTML = me.cards.map((c, i) => {
     const known = knownCards[c.id];
     const selectable = (selectMode && canSelectOwn()) ? 'selectable' : '';
+    const isPeeking = initialPeekCards.includes(c.id);
+    const flipClass = isPeeking ? 'flip-in' : '';
 
     if (known) {
       const color = getCardColor(known);
-      return `<div class="card card-face ${color} ${selectable}" onclick="onCardClick('${myId}', ${i})">
+      return `<div class="card card-face ${color} ${selectable} ${flipClass}" data-card-id="${c.id}" onclick="onCardClick('${myId}', ${i})">
                 ${formatCardShort(known)}
               </div>`;
     }
-    return `<div class="card card-back ${selectable}" onclick="onCardClick('${myId}', ${i})"></div>`;
+    return `<div class="card card-back ${selectable}" data-card-id="${c.id}" onclick="onCardClick('${myId}', ${i})"></div>`;
   }).join('');
 }
 
