@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Kaboom</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -12,46 +12,40 @@
     <div id="lobby-screen" class="screen active">
       <h1>💥 Kaboom</h1>
       <p class="subtitle">A card game of memory and strategy</p>
-
       <div class="lobby-actions">
         <div class="input-group">
           <label for="player-name">Your Name</label>
           <input type="text" id="player-name" placeholder="Enter your name" maxlength="12">
         </div>
-
         <button id="create-btn" class="btn btn-primary">New Game</button>
-
         <div class="divider">or</div>
-
         <div class="input-group">
           <label for="room-code">Room Code</label>
           <input type="text" id="room-code" placeholder="Enter code" maxlength="6">
         </div>
         <button id="join-btn" class="btn btn-secondary">Join Game</button>
       </div>
-
-      <div id="rules-toggle" class="rules-toggle">
+      <div class="rules-toggle">
         <button class="btn btn-text" onclick="toggleRules()">📖 Rules</button>
       </div>
-
       <div id="rules" class="rules hidden">
         <h3>How to Play</h3>
         <ul>
           <li>Each player gets 4 face-down cards. You peek at your bottom 2 at the start.</li>
-          <li>Goal: have the <strong>lowest total score</strong> when someone calls Cambio.</li>
+          <li>Goal: have the <strong>lowest total score</strong> when someone calls Kaboom.</li>
           <li>On your turn: draw from the deck, then swap it with one of your cards or discard it.</li>
-          <li><strong>Sticking:</strong> When a card is discarded, if you have a matching value you can "stick" it onto the pile. You can also stick an opponent's card and give them one of yours.</li>
-          <li><strong>Special cards:</strong>
+          <li><strong>Sticking:</strong> When a card is discarded, if you have a matching value you can "stick" it. You can also stick an opponent's card and give them one of yours.</li>
+          <li><strong>Special cards (use power OR swap, not both):</strong>
             <ul>
               <li>7/8 — Peek at one of your own cards</li>
               <li>9/10 — Peek at one of an opponent's cards</li>
               <li>Jack — Blind swap (your card ↔ opponent's)</li>
-              <li>Queen — Peek at any card, then optionally swap it with any other</li>
-              <li>Black King — Peek at any 2 cards, then optionally swap them</li>
+              <li>Queen — Peek any card, optionally swap it with another</li>
+              <li>Black King — Peek any 2 cards, optionally swap them</li>
             </ul>
           </li>
           <li><strong>Scoring:</strong> A=1, 2-10=face value, J=11, Q=12, Black K=25, Red K=−1, Joker=−1</li>
-          <li><strong>Kaboom!</strong> Call it on your turn (before drawing) when you think you're lowest. Everyone else gets one more turn, then reveal.</li>
+          <li><strong>Kaboom!</strong> Call on your turn (before drawing). Everyone else gets one more turn.</li>
         </ul>
       </div>
     </div>
@@ -64,28 +58,30 @@
       <p class="waiting-msg">Waiting for players...</p>
     </div>
 
+    <!-- Ready Check Screen -->
+    <div id="ready-screen" class="screen">
+      <h2>Everyone Ready?</h2>
+      <div id="ready-list" class="ready-list"></div>
+      <button id="ready-btn" class="btn btn-success">I'm Ready!</button>
+    </div>
+
     <!-- Game Screen -->
     <div id="game-screen" class="screen">
-      <div id="opponents-area" class="opponents-area"></div>
-
-      <div class="table-center">
-        <div class="deck-area">
-          <div id="deck" class="card card-back deck-card">
-            <span class="deck-count"></span>
+      <div class="table">
+        <div id="opponents-area" class="opponents-area"></div>
+        <div class="table-center">
+          <div class="deck-area">
+            <div id="deck" class="card card-back deck-card"><span class="deck-count"></span></div>
+            <div id="discard" class="card discard-card empty"><span class="card-text">-</span></div>
           </div>
-          <div id="discard" class="card discard-card empty">
-            <span class="card-text">-</span>
-          </div>
+          <div id="game-info" class="game-info"></div>
+          <div id="action-buttons" class="action-buttons"></div>
+          <div id="drawn-card-area" class="drawn-card-area hidden"></div>
         </div>
-        <div id="game-info" class="game-info"></div>
-        <div id="action-buttons" class="action-buttons"></div>
+        <div id="my-seat" class="my-seat">
+          <div id="my-cards" class="my-cards"></div>
+        </div>
       </div>
-
-      <div id="my-area" class="my-area">
-        <div id="my-cards" class="my-cards"></div>
-        <div id="drawn-card-area" class="drawn-card-area hidden"></div>
-      </div>
-
       <div id="toast" class="toast hidden"></div>
     </div>
 
@@ -96,7 +92,6 @@
       <button class="btn btn-primary" onclick="location.reload()">Play Again</button>
     </div>
   </div>
-
   <script src="game.js"></script>
 </body>
 </html>
